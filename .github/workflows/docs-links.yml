@@ -1,0 +1,25 @@
+name: 文档链接检查
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO 固定到提交 SHA，见 docs/process/ci.md §6
+      - uses: actions/checkout@v4
+      - name: 检查 Markdown 链接与锚点
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --include-fragments --no-progress "./**/*.md"
+          fail: true

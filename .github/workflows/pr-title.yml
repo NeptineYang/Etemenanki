@@ -1,0 +1,25 @@
+name: PR 规范检查
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO 固定到提交 SHA，见 docs/process/ci.md §6
+      - name: 校验 PR 标题
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -eu
+          pattern='^(feat|fix|refactor|chore|test|docs|build|data): .+'
+          if ! printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "PR 标题不符合约定：$TITLE"
+            echo "格式：类型: 简短描述；类型限 feat、fix、refactor、chore、test、docs、build、data。"
+            exit 1
+          fi
