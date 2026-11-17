@@ -386,7 +386,7 @@ flowchart TD
 | 内容 | 估算大小 | 说明 |
 | --- | ---: | --- |
 | Windows 安装包与便携包（Core、Tauri 窗口、Worker、精简 JRE、embeddable Python） | 约 150–400 MB | 不含 WSL2 环境包、工具链、浏览器和模型 |
-| `.wsl` 环境包（Debian 13 slim + runner） | 约 200–500 MB | 不含语言工具链与 Playwright 浏览器，首次使用时按需下载 |
+| `.wsl` 环境包（Debian 13 slim + runner） | 目标 ≤ 450 MB | 不含语言工具链与 Playwright 浏览器，首次使用时按需下载 |
 | 按需下载的工具链与浏览器 | 约 3–8 GB | JDK、Maven、Node、Playwright，版本与 SHA256 固定在环境定义里 |
 | 首次依赖与构建缓存 | 约 2–10 GB，随项目增长 | Maven、npm/pnpm、Python 包和浏览器缓存 |
 | 云端模型典型本地总占用 | 约 4–12 GB 起 | 不含项目输出和大型缓存，以实际镜像为准 |
