@@ -1,0 +1,14 @@
+Etemenanki
+Copyright 2026 Neptine Yang, Grace W, Zven He
+
+This product includes software developed by the Etemenanki contributors.
+
+Third-party components distributed with release artifacts are listed below.
+Exact versions, license texts and, where required, source offers are shipped
+with each release.
+
+- Eclipse Temurin JRE (GPLv2 with Classpath Exception), https://adoptium.net/
+- Python embeddable package (Python Software Foundation License), https://www.python.org/
+- Debian GNU/Linux root filesystem for WSL2 (individual component licenses), https://www.debian.org/
+
+The Apache License 2.0 text for this project is in the LICENSE file.

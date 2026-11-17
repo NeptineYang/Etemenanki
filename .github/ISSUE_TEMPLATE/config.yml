@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题
+    url: https://github.com/NeptineYang/Etemenanki/security/advisories/new
+    about: 请通过私密渠道报告漏洞，不要提交公开 Issue。
+  - name: 使用与设计问题
+    url: https://github.com/NeptineYang/Etemenanki/discussions
+    about: 提问、讨论设计取舍与迁移可行性。

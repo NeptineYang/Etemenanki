@@ -1,0 +1,23 @@
+name: 安全基线
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO 固定到提交 SHA，见 docs/process/ci.md §6
+      # 个人仓库可免费使用；组织仓库需要 GITLEAKS_LICENSE。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 密钥扫描
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

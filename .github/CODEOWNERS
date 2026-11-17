@@ -1,0 +1,7 @@
+# 默认负责人。V1 阶段只有一位维护者，暂不启用“必须由 code owner 审核”。
+* @NeptineYang
+
+# 设计与流程文档
+/docs/ @NeptineYang
+/DESIGN.md @NeptineYang
+/AGENTS.md @NeptineYang
