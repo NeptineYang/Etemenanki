@@ -8,18 +8,33 @@ on:
     branches: [main]
     paths:
       - "**/*.md"
+  schedule:
+    - cron: "0 2 * * 1"
 
 permissions:
   contents: read
 
 jobs:
-  links:
+  internal:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       # TODO 固定到提交 SHA，见 docs/process/ci.md §6
       - uses: actions/checkout@v4
-      - name: 检查 Markdown 链接与锚点
+      - name: 检查仓库内链接与锚点
         uses: lycheeverse/lychee-action@v2
         with:
           args: --offline --include-fragments --no-progress "./**/*.md"
+          fail: true
+
+  external:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      # TODO 固定到提交 SHA，见 docs/process/ci.md §6
+      - uses: actions/checkout@v4
+      - name: 检查外部链接
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --max-concurrency 8 "./**/*.md"
           fail: true

@@ -67,7 +67,8 @@
 ### 做了什么
 
 1. 复核 Q1–Q49，识别被后位决策覆盖的项，记入 `DESIGN.md` 附录 A。
-2. 追加 Q50–Q65：环境包内容寻址独立版本线；安装器 `currentUser`，路径定制交给便携版（修正 Q17）；数据与密钥按形态区分；校验后由程序启动安装器；Debian 13 slim；runner 用 Rust 共用协议 crate；白名单代理在 runner 内；bubblewrap + cgroup v2；工作区在 WSL 内、stdio 传 tar；无 WSL2 时 Gradle 阻断迁移保留扫描；合并即正式发布；联调移到 PR 前；1.0 前不回溯；工具链下载双路径；Tauri 安全四项全做。
+2. 追加 Q50–Q69：环境包内容寻址独立版本线；安装器 `currentUser`，路径定制交给便携版（修正 Q17）；数据与密钥按形态区分；校验后由程序启动安装器；Debian 13 slim；runner 用 Rust 共用协议 crate；白名单代理在 runner 内；bubblewrap + cgroup v2；工作区在 WSL 内、stdio 传 tar；无 WSL2 时 Gradle 阻断迁移保留扫描；合并即正式发布；联调移到 PR 前；1.0 前不回溯；工具链下载双路径；Tauri 安全四项全做；CLI 可选加入 PATH（Q66）；卸载默认删除数据与发行版（Q67）；生成风格按语义分型（Q68）；GEO 用 GitHub Pages（Q69）。
+3. 把各文档的 `[待定]` 全部替换为可执行规格：协议超时与并发、SQLite 迁移与回放缓存、Maven 与 Gradle 约束、私有仓库凭据、置信度三级、生成风格、IR 信封、报告字段、source map 关联、模块边界、试点规则、发布工作流结构、手工联调 13 项清单、`llms.txt` 模板。仅保留 V1-A 实测项与 1.0 决策项。
 3. `DESIGN.md` 升 V1.1：§0 文档索引、15 处章节修订、附录 A。
 4. 新建 `docs/design/` 六篇、`docs/process/` 三篇；`AGENTS.md` 校正为当前形态。
 5. `LICENSE` 恢复 Apache-2.0 原文并新建 `NOTICE`；新增 `.gitattributes`、`CODEOWNERS`、PR/Issue 模板、`SECURITY.md` 与三个工作流。
@@ -80,7 +81,7 @@
 
 ### 未完成项
 
-- 各文档末节仍有 `[待定]` 项，待 Q66+ 或 V1-A 实测冻结。
+- 各文档的开放项只剩 V1-A 实测值与 1.0 决策项（自定义域名、对比页对象、`release/1.x`）。
 - `.gitignore` 的 `env/`、`out/`、`build/`、`dist/` 未锚定。
 - 仓库设置需在 GitHub 侧开启：分支保护与必需检查、secret scanning 与 push protection、Discussions。
 
@@ -88,4 +89,4 @@
 
 1. 提交并推送 `docs/design-baseline`，开 PR 评审。
 2. 修正 `.gitignore` 未锚定规则。
-3. 按各文档“待定事项”继续拷问，或在 V1-A 用实测数据冻结。
+3. V1-A 阶段用实测数据回填各文档的校准项。

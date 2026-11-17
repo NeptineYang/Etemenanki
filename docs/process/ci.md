@@ -14,7 +14,7 @@
 | PR 规范检查 | `.github/workflows/pr-title.yml` | 标题必须匹配 `类型: 描述`，类型限于 `feat`、`fix`、`refactor`、`chore`、`test`、`docs`、`build`、`data` |
 | 安全基线 | `.github/workflows/security.yml` | 对 push 与 PR 运行密钥扫描；同时开启 GitHub 原生 secret scanning 与 push protection |
 | 协作模板 | `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/`、`.github/SECURITY.md` | 统一 PR 正文、Issue 分类与漏洞上报入口 |
-| 文档链接检查 | `.github/workflows/docs-links.yml` | 检查 Markdown 中的相对链接与锚点，防止 `RESEARCH.MD` 这类坏链再次出现 |
+| 文档链接检查 | `.github/workflows/docs-links.yml` | PR 内只查仓库内相对链接与锚点；外链每日定时检查，失败不阻断 PR，只开 Issue 提醒 |
 
 各组件的 CI 随该组件第一个 PR 一起加入，不预先搭空流水线。CodeQL、许可证检查、SBOM 与发版流水线等有实际代码后再加。
 
@@ -51,8 +51,20 @@ GitHub 托管的 Windows runner 不支持 WSL2（runner-images #10563 已以 not
 
 - 触发条件：每个 X.Y.0 的 PR；触及 runner 或桥接层的 patch PR。
 - 时机：PR 合并前完成，结果附在该 PR。合并即正式发布，没有发布后补验的窗口。
-- 内容：安装包安装与卸载、便携版解压即用、环境包导入、`wsl.exe` 拉起 runner、受控环境截图、断网构建、密钥与数据位置、Tauri 配置快照（CSP、capability、禁远程内容、devtools 关闭）。
-- 清单随版本演进，模板放在 `docs/process/` 下，与本文同目录维护。
+- 清单（随版本演进，模板在本目录维护）：
+  1. 安装包安装：默认路径、CLI 加入 PATH 默认勾选、WebView2 缺失时的引导。
+  2. 卸载：两个默认勾选项生效，`PATH` 条目被移除，未勾选内容保留。
+  3. 便携版：中文路径、长路径、只读目录下的启动与数据写入。
+  4. 环境包：双击安装与 `wsl --install --from-file` 两种方式。
+  5. 桥接：`wsl.exe` 拉起 runner、握手成功、断网构建、退出后无残留进程。
+  6. 受控环境截图：固定字体、视口、时区、语言，零像素差通过。
+  7. 凭据：API key 存取；便携版 DPAPI 目录换用户后无法解密。
+  8. 网络：代理、镜像、私有仓库凭据只进入下载阶段。
+  9. 更新：releases 列表能识别 pre-release，SHA256 校验失败时拒绝安装。
+  10. 版本：关于页、安装包元数据、`--version` 输出一致。
+  11. 语言：界面与报告中英切换，CLI 保持英文。
+  12. 恢复：强杀 runner 后重启，从检查点续跑且不覆盖已审核结果。
+  13. 安全快照：CSP、capability、禁远程内容、devtools 关闭四项未被放宽。
 
 ## 5. 工具链固定
 
@@ -69,9 +81,9 @@ GitHub 托管的 Windows runner 不支持 WSL2（runner-images #10563 已以 not
 - 为 Actions 开启 Dependabot，定期升级固定版本。
 - 发布物附构建来源证明，用户可用 `gh attestation verify` 核对。
 
-## 7. 待定事项
+## 7. 已定工具与 V1-A 校准
 
-- [待定] 密钥扫描工具选型：GitHub 原生、gitleaks（需核查许可证）或两者并用。
-- [待定] 文档链接检查工具（lychee 或其他）与是否检查外链。
-- [待定] 环境包构建是否完全在 CI 内完成，还是允许本地可复现脚本。
-- [待定] X.Y.0 手工联调清单的正式模板内容。
+- 密钥扫描：GitHub 原生 push protection 与 gitleaks（MIT）双轨；规则集随仓库维护，本地可用同一份配置预检。
+- 文档链接：lychee。PR 只查仓库内链接与锚点（`--offline`）；外链走每周定时任务，失败只通知维护者，不阻断 PR。
+- 环境包：只在 CI 构建，不提供“本地打包后上传”的路径；调试用同一脚本在容器内运行。
+- V1-A 校准：第三方 Action 的 SHA 固定、环境包构建时长与缓存策略、手工联调清单的最终模板。

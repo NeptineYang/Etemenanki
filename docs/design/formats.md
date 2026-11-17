@@ -30,6 +30,34 @@
 
 判定规则：命中 `guaranteed` 走保证路径；命中 `experimental` 走实验路径并单独统计；命中 `blocked` 直接阻断并输出缺口。
 
+示例（节选）：
+
+```toml
+schema_version = "1.0"
+
+[stack]
+id = "a-api-fullstack"
+status = "guaranteed"
+evidence = "tests/conformance/a-api"
+
+[[stack.source]]
+language = "java"
+version = "17"
+framework = "spring-boot"
+framework_range = ">=3.0,<4.0"
+build = "maven"
+
+[[stack.target]]
+language = "python"
+version = "3.12"
+framework = "fastapi"
+build = "uv"
+
+[stack.features]
+supported = ["rest-controller", "jpa-repository", "bean-validation", "scheduled-task"]
+excluded = ["reflection-proxy", "custom-classloader"]
+```
+
 ## 3. 依赖映射库
 
 位置：`mappings/deps/*.toml`，按生态分文件。
@@ -48,11 +76,29 @@
 
 依赖平替不能只比较名称：功能、默认值、异常语义、维护状态与许可证都要记录。许可证受限的实现不得复制进本仓库。
 
+示例（节选）：
+
+```toml
+schema_version = "1.0"
+
+[[mapping]]
+source = "org.springframework.boot:spring-boot-starter-web"
+target = "fastapi"
+license = { source = "Apache-2.0", target = "MIT" }
+maintenance = { source = "active", target = "active", checked = "2026-11-17" }
+behavior_diff = "默认 JSON 序列化字段命名与错误响应结构不同，需显式配置"
+evidence = "mappings/tests/starter-web.md"
+reviewer = "@NeptineYang"
+status = "guaranteed"
+```
+
 ## 4. source map
 
 - 采用 Source Map v3，记录目标片段到源位置的映射。
 - 另附一份旁注文件（JSON），记录每个映射的规则或模型、依赖决策、置信度与验证状态。
 - 生成代码中的每个文件都要可追溯到源文件；无法映射的生成内容必须显式标记为 `generated`。
+- 目录约定：`sourcemap/` 下按目标路径镜像存放 `<target>.map` 与同名的 `<target>.map.meta.json`（旁注）；`sourcemap/manifest.json` 统一登记 `target`、`source_map`、`sidecar`、`generated` 四个字段，作为唯一入口。
+- 旁注与 map 必须同时存在；只有 map 没有旁注视为构建产物不完整，报告标为缺陷。
 
 ## 5. 报告
 
@@ -66,6 +112,8 @@
 
 JSON 是唯一事实来源，HTML 由 JSON 渲染，不手工维护。报告必须包含生成器版本、支持矩阵版本、映射库版本与模型快照，保证旧报告可复现。
 
+迁移报告的 JSON 顶层字段固定为：`schema_version`、`run`（时间、工具版本、模型快照）、`project`（源/目标栈、许可证）、`modules[]`（状态、有效代码行、缺口）、`gaps[]`、`manual_tasks[]`、`metrics`、`artifacts[]`、`audit[]`。新增字段只能追加，不改变既有字段语义。
+
 ## 6. 应用配置
 
 - 用户配置使用 TOML，位于数据目录；界面只读写这一份文件。
@@ -73,9 +121,35 @@ JSON 是唯一事实来源，HTML 由 JSON 渲染，不手工维护。报告必�
 - 配置项带默认值与作用域说明；未知字段在读取时告警但不阻断。
 - 机器可读的导出（如诊断包）使用 JSON，并在导出前做密钥扫描。
 
-## 7. 待定事项
+## 7. 迁移 IR 信封（初版）
 
-- [待定] 支持矩阵与依赖映射的具体字段冻结（V1-A）。
-- [待定] IR 的 JSON Schema 结构：节点类型、边类型、语言专属扩展点的表达方式。
-- [待定] 报告的章节结构与审计字段清单。
-- [待定] 旁注文件与 source map 的关联方式（同目录同名前缀，还是独立索引文件）。
+```json
+{
+  "schema_version": "1.0",
+  "nodes": [
+    {
+      "id": "java:com.example.OrderService#create",
+      "kind": "method",
+      "lang": "java",
+      "span": { "file": "src/main/java/com/example/OrderService.java", "start": 42, "end": 88 },
+      "evidence": [{ "type": "signature", "ref": "OrderService.java:42" }],
+      "confidence": "high",
+      "attrs": {}
+    }
+  ],
+  "edges": [
+    { "from": "java:com.example.OrderController#post", "to": "java:com.example.OrderService#create", "kind": "calls", "confidence": "high" }
+  ]
+}
+```
+
+- `kind` 取值：`package`、`module`、`class`、`interface`、`function`、`method`、`type`、`config`、`route`、`entity`、`template`、`component`、`asset`、`test`。
+- `attrs` 保存语言专属信息（修饰符、异常、注解、装饰器、类型参数等），禁止把语言专属语义压平到通用字段。
+- 边类型：`calls`、`inherits`、`implements`、`reads`、`writes`、`injects`、`routes`、`renders`、`depends`、`flows`、`tests`。
+- 每个节点必须带 `span` 与至少一条 `evidence`；缺失即视为解析失败，不得静默生成。
+
+## 8. V1-A 冻结项
+
+- 字段命名与枚举值的最终冻结（当前为初版）。
+- 报告 HTML 模板的章节顺序与中英文案。
+- `audit[]` 的完整字段清单。

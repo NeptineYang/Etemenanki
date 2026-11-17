@@ -18,6 +18,9 @@ V1 只发布 Windows 11 x64，不发布 Linux 与 macOS 桌面版，也不要求
 
 界面为 Tauri 2 桌面窗口，使用系统 WebView2。安装包不提供路径选择：安装目录固定，需要自定义位置时使用便携版。这一口径取代早期“安装到指定位置”的表述。
 
+- WebView2 使用 `embedBootstrapper`（约 1.8 MB）：Win11 自带时跳过，缺失时由安装包内置的引导器联网安装；全程离线安装不在 V1 范围。
+- CLI 默认加入用户级 `PATH`，安装界面提供可取消的勾选项并说明改动；卸载时移除该项。便携版不修改 `PATH`，由用户在需要时自行配置。
+
 ## 2. 目录、数据与凭据
 
 | 项目 | 安装版 | 便携版 |
@@ -29,7 +32,7 @@ V1 只发布 Windows 11 x64，不发布 Linux 与 macOS 桌面版，也不要求
 
 便携版的 DPAPI 加密绑定当前 Windows 用户账户：目录拷到其他机器或其他用户下无法解密，教程中明确说明。
 
-卸载时询问用户是否同时删除数据；WSL2 发行版单独询问，并提供 `wsl --unregister` 的双语说明。此项为 SignPath 对“系统改动需可卸载”的要求。
+卸载时提供两个独立勾选项：删除应用数据、注销 WSL2 发行版，默认都勾选。勾选时显示不可逆警告，并列出将删除的具体内容（工作区、报告、凭据条目、发行版及其缓存）；取消勾选则保留对应内容。若曾把 CLI 加入 `PATH`，卸载时移除用户级条目。此项满足 SignPath 对“系统改动需可卸载”的要求。
 
 ## 3. 首次使用
 
@@ -70,7 +73,7 @@ Release 说明取该版本对应 PR 的标题与链接，不维护 `CHANGELOG.md
 
 - 基础系统：Debian 13 slim，规避再分发修改版 Ubuntu rootfs 的商标限制。
 - 内容：精简 rootfs + Rust runner，不含 JDK、Maven、Node 与 Playwright 浏览器。
-- 构建：CI 从官方镜像可复现构建，产物约 200–500 MB。
+- 构建：CI 用 mmdebstrap 从 Debian 官方镜像源构建，不依赖手工环境；产物目标 `≤ 450 MB`（gzip 后的 `.wsl`），超出时先削减文档、locale 与缓存，不裁剪工具链。
 - 安装：双击安装，或在 PowerShell 执行 `wsl --install --from-file <file>`；发行版默认名称在 `oobe.defaultName` 中固定。
 - 配置：`/etc/wsl.conf` 设置 `[automount] enabled=false`、`[interop] enabled=false`、`appendWindowsPath=false`。
 - 工具链：首次使用时按需下载，版本与 SHA256 由 Core 下发的清单固定，缓存在发行版内。下载优先由 runner 在 WSL 内直连（走代理与镜像）；直连失败时回退为 Windows 侧下载后推送进发行版。
@@ -91,9 +94,11 @@ Release 说明取该版本对应 PR 的标题与链接，不维护 `CHANGELOG.md
 - 1.0.0 之前只通过 GitHub Releases 分发。国内下载渠道在 1.0.0 与 GEO 一并评估；Gitee 附件上限放不下安装包，不作为候选。
 - GHCR 不再使用：项目不产出容器镜像。
 
-## 9. 待定事项
+## 9. V1-A 实测确认项
 
-- [待定] WebView2 安装方式。拟定 `embedBootstrapper`（约 1.8 MB），Win11 自带时跳过。
-- [待定] CLI 是否加入 `PATH`。若加入，须在安装界面披露对系统的改动。
-- [待定] 卸载时是否默认删除 WSL2 发行版，还是仅提示。
-- [待定] 环境包的体积目标与 rootfs 构建是否完全在 CI 内完成。
+以下数值无法在设计阶段确定，由首个垂直切片记录并回填本文：
+
+- 安装目录在 `%LOCALAPPDATA%` 下的确切子目录，以及 NSIS 实际默认值。
+- 环境包压缩后的实际体积与解压占用。
+- 目标机器上 WebView2 的缺失比例，用于校准安装提示文案。
+- 便携版在中文路径、长路径、只读目录下的实际行为。
