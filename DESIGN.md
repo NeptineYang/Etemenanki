@@ -1,10 +1,26 @@
 # 跨语言代码迁移平台设计文档
 
 - 文档状态：立项设计基线
-- 版本：V1.0
-- 日期：2026-11-12
-- 需求来源：两次项目讨论及后续选项式需求确认
-- 调研依据：见 [RESEARCH.MD](./RESEARCH.MD)
+- 版本：V1.1
+- 日期：2026-11-17
+- 需求来源：三轮项目讨论及后续选项式需求确认（Q1–Q65）
+- 调研依据：见 [RESEARCH.md](./RESEARCH.md)
+
+## 0. 文档索引
+
+本文件是总纲，只保留方向性结论；可执行细节按下表下沉。两者冲突时以细分文档为准，并在同一 PR 内修正本文件对应条款。
+
+| 文档 | 内容 | 本文件对应章节 |
+| --- | --- | --- |
+| [docs/design/delivery.md](docs/design/delivery.md) | 交付形态、安装与便携版、更新、发布物、WSL2 环境包 | §9 |
+| [docs/design/protocol.md](docs/design/protocol.md) | Worker/runner 协议、JSON Schema、版本握手、任务状态机 | §5.1、§5.2 |
+| [docs/design/security.md](docs/design/security.md) | 威胁模型、两阶段依赖获取、WSL2 沙箱、密钥与提示词注入 | §10 |
+| [docs/design/semantics.md](docs/design/semantics.md) | Java↔Python 语义差异、保真与地道、类型证据、编码 | §2、§3.3 |
+| [docs/design/formats.md](docs/design/formats.md) | 支持矩阵、依赖映射、source map、报告与配置格式 | §5.3、§9.1 |
+| [docs/design/metrics.md](docs/design/metrics.md) | 四种状态、行为已验证率、模块与有效代码行口径 | §8.1、§8.4 |
+| [docs/process/versioning.md](docs/process/versioning.md) | 版本号规则、标签、发版与回溯策略 | §12 |
+| [docs/process/ci.md](docs/process/ci.md) | 仓库自动化、组件 CI、手工联调 | §12.3 |
+| [docs/process/geo.md](docs/process/geo.md) | 每个 X.0.0 发布后的 GEO 清单 | — |
 
 ## 1. 项目概述
 
@@ -48,9 +64,9 @@
 | 外部系统兼容 | API、数据库 schema、消息协议可能被模型擅自改变 | 默认全部保持；模型只能提交变更提议和影响分析，人工批准后才能执行 |
 | 无测试旧项目无法证明等价 | 人工阅读无法覆盖隐藏行为 | 可先生成特征测试；用户也可跳过，但结果只能标记“迁移完成”，不能计入“行为已验证” |
 | 前端跨语言族 | 组件、状态、CSS、浏览器 API 和构建插件没有通用映射 | 只保证指定框架对；建立 UI 组件映射和运行适配层；未知框架实验处理 |
-| UI 一致难以量化 | 字体、浏览器、动画和动态数据会造成截图噪声 | 在固定容器、字体、浏览器、视口、时区和数据下做零像素差及交互测试 |
+| UI 一致难以量化 | 字体、浏览器、动画和动态数据会造成截图噪声 | 在固定环境、字体、浏览器、视口、时区和数据下做零像素差及交互测试 |
 | 生成代码可运行但难维护 | 直译代码可能形成新的遗留系统 | 目标语言 lint、类型检查、复杂度检查和人工 diff 审核；记录 source map 和转换理由 |
-| 执行不可信代码有安全风险 | 构建脚本和测试可能读取凭据、访问网络或破坏宿主机 | 所有构建和测试放入无特权、默认断网、资源受限的容器沙箱 |
+| 执行不可信代码有安全风险 | 构建脚本和测试可能读取凭据、访问网络或破坏宿主机 | 所有构建和测试放入无特权、默认断网、资源受限的隔离沙箱 |
 | 云端模型带来源码泄露风险 | 上下文、日志和错误信息可能包含源码或密钥 | 逐项目授权、最小化上传、密钥扫描、审计、提供方保留策略核查及本地模型备选 |
 
 ## 3. 目标、用户与范围
@@ -82,12 +98,17 @@
 | A：API 型全栈 | Java 17、Spring Boot 3、React、TypeScript、Maven、JUnit | Python 3.12、FastAPI、Reflex、uv、pytest | API 契约、单元/集成测试、React↔Reflex 组件映射、受控环境零像素差、E2E |
 | B：服务端渲染全栈 | Java 17、Spring Boot 3、Thymeleaf、Maven、JUnit | Python 3.12、Django、Django Templates、uv、pytest | 页面路由、模板、表单、ORM、会话、受控环境零像素差、E2E |
 
-V1 建议只把 Maven 和 uv/npm/pnpm 的锁定组合列入保证矩阵。Gradle、pip/Poetry 及其他组合可先进入实验矩阵，通过基准后再提升等级。
+V1 只把 Maven 和 uv/npm/pnpm 的锁定组合列入保证矩阵。Gradle、pip/Poetry 及其他组合进入实验矩阵，通过基准后再提升等级。
+
+Gradle 源项目适用一条已批准的安全例外：解析依赖必须执行项目自身的构建脚本，因此联网阶段允许执行脚本，约束见 §10.3 与 [security.md](docs/design/security.md)。没有 WSL2 时，Gradle 项目只能导入、扫描和查看依赖声明与调用图，不生成目标项目。
+
+参考版本为 Java 17 + Spring Boot 3、Python 3.12，各框架精确版本在 V1-A 冻结。Java 低于 17 或 Spring Boot 2 的项目在 V1 直接阻断并输出缺口报告，旧版本支持记入 V2/V3；其余不在参考版本上的框架组合走实验路径，不计入保证范围。
 
 ### 3.4 V1 默认不保证的特性
 
 - Java 反射、动态代理、自定义类加载器、字节码生成、JNI、复杂并发和自定义构建插件。
 - Python `eval`/`exec`、动态模块加载、复杂元类、猴子补丁和未声明的 C 扩展行为。
+- Java 注解处理器的完整语义。Lombok 由内置固定版本执行 delombok 后分析；MapStruct 等生成代码从 WSL2 基线构建取回再分析；没有 WSL2 时只分析到注解层，缺口必须写入报告。
 - 任意前端框架、浏览器扩展、原生移动端和桌面 GUI。
 - 未固定版本或无法复现构建的项目。
 - 大型单体、跨仓库依赖和复杂遗留系统；这些属于 V3。
@@ -105,6 +126,8 @@ V1 建议只把 Maven 和 uv/npm/pnpm 的锁定组合列入保证矩阵。Gradle
 - 已公开的文件格式、CLI 参数和退出码。
 
 模型可建议修改，但必须输出原因、影响面、兼容方案和回滚方案，经人工批准后才可进入执行计划。
+
+平台自身的对外契约面只有三项：CLI 参数与退出码、报告与映射及 IR 的文件格式、Worker/runner 协议。V1 不提供本地 HTTP API，界面通过 Tauri IPC 调用 Core，因此不存在网络接口契约。
 
 ## 4. 项目工作流程
 
@@ -136,7 +159,7 @@ flowchart TD
     M --> O[规则与模型混合转写]
     N --> O
     O --> P[生成代码/配置/构建脚本/测试/source map]
-    P --> Q[容器沙箱构建与静态检查]
+    P --> Q[沙箱构建与静态检查]
     Q --> R{构建或测试失败}
     R -->|是且预算未用尽| S[错误定位与最小补丁修复]
     S --> Q
@@ -173,13 +196,14 @@ flowchart TD
 
 | 组件 | 建议实现 | 职责 |
 | --- | --- | --- |
-| Rust Core | Rust、Tokio、Axum、Clap、Serde、SQLite | 项目图谱、迁移 IR、任务状态机、依赖闭包、策略、审计、模型网关、CLI、本地 API |
-| Java Worker | Java、JavaParser + Symbol Solver，按需使用 Spoon | Java AST、类型和符号解析、classpath 分析、源到目标映射证据 |
-| Python Worker | Python 3.12、LibCST、`ast`、类型检查工具、pytest | Python CST、作用域与类型证据、目标代码修改、测试和模型工具适配 |
+| Rust Core | Rust、Tokio、Clap、Serde、SQLite | 项目图谱、迁移 IR、任务状态机、依赖闭包、策略、审计、模型网关、CLI 库、Tauri 命令后端 |
+| Tauri 桌面壳 | Tauri 2、系统 WebView2 | 窗口、菜单、设置、安装包与更新检查；通过 IPC 调用 Core，不监听端口 |
+| Java Worker | Java 17、JavaParser + Symbol Solver，按需使用 Spoon | Java AST、类型和符号解析、classpath 分析、源到目标映射证据；随包附带 jlink 精简 JRE |
+| Python Worker | Python 3.12、LibCST、`ast`、类型检查工具、pytest | Python CST、作用域与类型证据、目标代码修改、测试和模型工具适配；随包附带 embeddable Python |
 | 快速索引器 | tree-sitter 及语言 grammars | 多语言索引、上下文检索、实验框架解析和错误恢复；不承担完整类型语义 |
-| Web 工作台 | React、TypeScript、Vite | 项目导入、支持矩阵提示、依赖和架构审核、diff、测试报告、人工任务 |
+| Web 工作台 | React、TypeScript、Vite，在 Tauri 窗口内运行 | 项目导入、支持矩阵提示、依赖和架构审核、diff、测试报告、人工任务 |
 | Model Gateway | Rust 策略层 + Python Provider Adapter | 云端/本地模型路由、结构化输出、上下文裁剪、预算、快照和审计 |
-| Sandbox Runner | Docker/Podman、固定工具链镜像 | 源/目标构建、测试、依赖安装、UI 截图、资源隔离和网络策略 |
+| WSL2 沙箱 | 专用 Debian 发行版 + Rust runner + bubblewrap + cgroup v2 | 源/目标构建、测试、依赖获取、UI 截图、资源隔离和网络策略；由 `wsl.exe` stdio 驱动 |
 | Verification Engine | Python/Rust + Playwright + 测试框架 | 单元、集成、API、差分、E2E、视觉、性能和契约验证 |
 | Artifact Store | 本地工作区 + SQLite + 文件对象存储目录 | 工作区、补丁、source map、日志、截图、报告、模型与提示词版本 |
 
@@ -190,11 +214,12 @@ flowchart TD
 边界如下：
 
 - Rust 不重复实现 Java 类型求解和 Python CST。
-- Java/Python Worker 通过本地进程协议通信，协议使用版本化 JSON-RPC 或等价 schema。
+- Java/Python Worker 在 Windows 本机以子进程运行，随包附带 jlink 精简 JRE 与 embeddable Python，用户无需自备运行时。
+- 沙箱侧由 WSL2 发行版内的 Rust runner 承担，与 Core 共用同一个协议 crate；`wsl.exe` 负责进程拉起，标准输入输出即传输通道。
 - 核心只依赖 Worker 输出的稳定语义模型，不依赖其内部 AST 类型。
 - 模型框架不侵入核心任务状态机，便于替换供应商和本地运行时。
 
-代价是组件、协议和调试链路增加，必须用统一 trace ID、契约测试和固定开发容器控制复杂度。
+代价是组件、协议和调试链路增加，必须用统一 trace ID、契约测试和固定版本的工具链与环境包控制复杂度。没有 WSL2 时仍可扫描、分析、生成和审核，但结果最高只能标记为“迁移完成”。
 
 ### 5.3 项目语义图与迁移 IR
 
@@ -222,17 +247,18 @@ flowchart TD
 
 | 类别 | 选型 | 选择理由 | 不采用的方案及原因 |
 | --- | --- | --- | --- |
-| 核心语言 | Rust | 性能、内存安全、CLI/服务一体化、核心包较小 | 纯 Rust 重写全部解析器，成本过高 |
+| 核心语言 | Rust | 性能、内存安全、CLI 与桌面后端一体化、核心包较小 | 纯 Rust 重写全部解析器，成本过高 |
 | Java 分析 | JavaParser + Symbol Solver；Spoon 按需 | 类型感知、符号解析和本地 Java 生态成熟 | 只用 tree-sitter，无法获得完整语义 |
 | Python 分析/修改 | LibCST + `ast` + 类型检查工具 | 保留格式、适合 codemod，能与 pytest 集成 | 只用文本替换，容易破坏语义 |
 | 多语言索引 | tree-sitter | 增量、快速、多语言和错误恢复 | 作为唯一语义前端，类型能力不足 |
 | 同语言重构 | OpenRewrite 按需 | 类型感知 Recipe 和构建集成成熟 | 直接复用全部模块，存在许可差异 |
-| Web | React + TypeScript + Vite | diff、图谱和审核交互生态成熟 | V1 桌面壳，增加打包和沙箱集成工作 |
-| 本地服务 | Axum + JSON-RPC/REST | 与 Rust 核心一致，便于 CLI/Web 复用 | V1 集中式多租户平台 |
+| 桌面壳 | Tauri 2 + WebView2 | 复用系统 WebView，安装包小，插件与 IPC 模型成熟 | 纯浏览器工作台，需要监听端口和会话令牌 |
+| Web | React + TypeScript + Vite（pnpm） | diff、图谱和审核交互生态成熟 | 引入第二套前端框架或服务端渲染 |
+| 进程通信 | Tauri IPC + stdio JSON-RPC | 单一进程边界，不开放任何本地端口 | Axum 本地 HTTP API，V1 无使用方且扩大攻击面 |
 | 数据 | SQLite + 本地内容寻址文件存储 | 单用户、本地、可备份、低运维 | V1 引入分布式数据库和消息队列 |
 | 测试 | JUnit、pytest、Playwright、API/差分测试 | 覆盖源和目标生态以及 UI 验证 | 仅以编译成功或 CodeBLEU 验收 |
-| 沙箱 | Docker/Podman 固定镜像 | 可复现、隔离不可信构建与测试 | 默认直接在宿主机运行项目 |
-| 构建交付 | Cargo、Maven/Gradle 工具链、uv、npm/pnpm、Docker Compose | 覆盖两套参考栈并支持本地一键编排 | 依赖用户全局环境造成不可复现 |
+| 沙箱 | WSL2 专用发行版 + bubblewrap + cgroup v2 | 用户无需安装 Docker，隔离强度满足不可信构建 | 宿主机直接运行；要求用户安装 Docker/Podman |
+| 构建交付 | Cargo、Maven、uv、pnpm、Tauri bundler、`.wsl` 环境包 | 覆盖两套参考栈与 Windows 分发 | Docker Compose 编排，要求用户维护容器环境 |
 
 ## 7. 模型选择与使用策略
 
@@ -257,7 +283,7 @@ flowchart TD
 | 本地质量优先候选 | Qwen3-Coder-Next | 经基准验证的其他开放权重模型 | 80B 总参数、3B 激活；理想 4-bit 权重约 40GB，实际部署还需运行时和 KV cache |
 | 本地资源受限候选 | gpt-oss-20b | 较小的 Qwen Coder | 官方 MXFP4 示例约 13.8G；需要验证实际迁移质量，不承诺与云端等价 |
 
-各模型的官方资料、上下文和其他候选见 [RESEARCH.MD](./RESEARCH.MD)。
+各模型的官方资料、上下文和其他候选见 [RESEARCH.md](./RESEARCH.md)。
 
 ### 7.3 任务路由
 
@@ -275,6 +301,12 @@ flowchart TD
 - 使用企业 API 时核查“不用于训练”、数据保留、区域、ZDR 和 DPA；消费级产品政策不能替代企业合同。
 - 日志记录 Provider、模型快照、请求目的和审计摘要；源码内容日志可配置关闭。
 - 未授权云端时只允许本地模型或纯确定性功能。
+
+### 7.5 接口协议与网络
+
+- V1 支持三类模型接口：OpenAI 兼容（填写 base URL、key 和模型名，覆盖 OpenAI、通义、DeepSeek、GLM、Ollama、vLLM）、Anthropic 原生、Gemini 原生。
+- 程序联网默认跟随系统代理，设置页可手动填写；WSL 内 runner 的下载复用同一代理，教程说明 mirrored 网络模式的配置方法。
+- 工具链与项目依赖默认使用官方源，可按源替换镜像；镜像自动加入白名单，锁定的依赖仍校验哈希。Maven 没有锁文件，换源等于信任镜像运营方，报告须注明。
 
 ## 8. 验证体系与验收标准
 
@@ -303,8 +335,8 @@ flowchart TD
 
 ### 8.3 零像素差的受控环境
 
-- 固定容器镜像、浏览器版本、字体文件、渲染参数和设备缩放。
-- 固定视口、操作系统镜像、时区、语言、色彩方案和浏览器 flags。
+- 固定 WSL2 环境包版本、工具链版本（JDK、Maven、Node、Python、Playwright 浏览器）、字体文件和渲染参数。
+- 固定视口、发行版镜像、时区、语言、色彩方案和浏览器 flags。
 - 固定数据库、API 响应、随机种子、时间和测试数据。
 - 禁用动画、光标闪烁和非确定性背景任务。
 - 动态区域原则上通过固定数据消除；确需遮罩时必须单独披露，遮罩区域不能包含关键业务结果。
@@ -317,7 +349,8 @@ flowchart TD
 - 至少 8 个未参与核心调参的外部项目完成试点，覆盖两套参考栈和两个方向。
 - 外部试点公开以下指标，而不是只展示成功案例：
   - 构建成功率。
-  - 行为已验证率，人工标记“迁移完成”不得计入。
+  - 行为已验证率，人工标记“迁移完成”不得计入；按项目级与模块级两种口径分别公布，不合并成单一数字。
+  - 每个模块的独立状态，项目状态取最差模块。
   - 自动测试覆盖及未验证范围。
   - 人工修改行数、审核时长、修复任务数和模型修复轮数。
   - token/模型成本、执行时长和性能回归。
@@ -330,19 +363,21 @@ flowchart TD
 
 ### 9.1 交付物
 
-1. 本地 Web 工作台。
-2. CLI：项目扫描、迁移、审核任务导出、测试、报告和 CI 批处理。
-3. Docker Compose 编排及固定版本的沙箱镜像定义。
-4. 目标项目源码、构建脚本、容器定义、配置和测试。
+1. Windows 安装包（NSIS，currentUser 模式）与便携 zip，包含 Tauri 窗口、Core、Java/Python Worker、精简 JRE 与 embeddable Python。
+2. 独立 CLI exe，直接调用 Core 库。
+3. `.wsl` 环境包（Debian 13 slim + Rust runner），内容寻址命名、独立版本线，仅在基础系统变化时重建。
+4. 目标项目源码、构建脚本、配置和测试；用户项目自身的容器定义仍按需生成。
 5. `source map`、依赖映射、架构和契约决策记录。
 6. HTML/JSON 迁移报告、测试报告、视觉报告、性能报告、SBOM 和审计日志。
 7. 失败清单、未验证清单、人工任务和回滚补丁。
 
 ### 9.2 支持平台
 
-- 正式支持：Linux、Windows 11 + WSL2。
-- 后续验证：macOS，不纳入 V1 保证。
-- 用户负责安装基础 Docker/Podman、WSL2 和模型凭据；项目级环境由生成的脚本和容器完成。
+- 正式支持：Windows 11 x64。V1 只发布这一平台。
+- 不要求 Docker/Podman。构建与测试在用户自行安装的 WSL2 发行版中执行，项目提供双语教程与 `.wsl` 环境包。
+- 没有 WSL2 时仍可扫描、分析、生成和审核，但结果最高标记为“迁移完成”，Gradle 源项目只能扫描。
+- macOS 与 Linux 桌面版在 V2 评估，不纳入 V1 保证。
+- 用户负责提供 WSL2（可选）和模型凭据；项目级环境由环境包与按需下载的工具链完成。
 
 ### 9.3 大小与资源估算
 
@@ -350,8 +385,9 @@ flowchart TD
 
 | 内容 | 估算大小 | 说明 |
 | --- | ---: | --- |
-| Rust Core、CLI、Web、Java/Python Worker 发行包 | 约 150–400 MB | 不含完整 JDK、Python、Node、浏览器和模型 |
-| 基础运行与沙箱镜像 | 约 3–8 GB | 包含两套语言工具链和 Playwright 浏览器后可能更大 |
+| Windows 安装包与便携包（Core、Tauri 窗口、Worker、精简 JRE、embeddable Python） | 约 150–400 MB | 不含 WSL2 环境包、工具链、浏览器和模型 |
+| `.wsl` 环境包（Debian 13 slim + runner） | 约 200–500 MB | 不含语言工具链与 Playwright 浏览器，首次使用时按需下载 |
+| 按需下载的工具链与浏览器 | 约 3–8 GB | JDK、Maven、Node、Playwright，版本与 SHA256 固定在环境定义里 |
 | 首次依赖与构建缓存 | 约 2–10 GB，随项目增长 | Maven、npm/pnpm、Python 包和浏览器缓存 |
 | 云端模型典型本地总占用 | 约 4–12 GB 起 | 不含项目输出和大型缓存，以实际镜像为准 |
 | 单次迁移工作区 | 原项目的约 1–3 倍起 | 不含依赖目录；截图、视频和多次补丁会继续增加 |
@@ -366,7 +402,8 @@ flowchart TD
 ### 10.1 V1 权限模型
 
 - V1 为单用户本地工作台，不实现多用户 RBAC。
-- Web 默认仅绑定 `127.0.0.1` 或 WSL2 本地入口，使用随机会话令牌。
+- 界面是 Tauri 窗口，通过进程内 IPC 调用 Core；CLI 直接链接 Core 库。程序不监听任何本地端口，也不使用会话令牌。
+- WSL2 内的 runner 由 `wsl.exe` 以子进程拉起，标准输入输出即通信通道，同样不开放端口。
 - 远程访问、多用户、SSO/LDAP 和组织权限不在当前 V1–V3 已确认主线内，启用前需单独完成威胁建模。
 - “人工审核”是工作流闸门，不代表已经存在独立审核员角色。
 
@@ -381,12 +418,13 @@ flowchart TD
 
 ### 10.3 沙箱要求
 
-- 非 root 运行、只读根文件系统、独立临时目录和最小 capabilities。
-- 默认无网络；依赖下载通过受控代理或域名白名单。
-- 限制 CPU、内存、进程数、磁盘和执行时间。
-- 不挂载宿主机敏感目录和 Docker socket。
-- 源项目以只读方式挂载或复制到隔离工作区。
-- 只有沙箱内产生的构建和测试结果可以标记为自动验证证据。
+- 沙箱是专用 WSL2 发行版：关闭 automount 与 interop，`appendWindowsPath=false`，发行版内不放用户凭据。
+- 构建与测试在 bubblewrap 命名空间内执行：`--unshare-net` 断网、只读根、独立 `/tmp`、禁止提权；资源由 `systemd-run` + cgroup v2 限制 CPU、内存、进程数和磁盘。
+- runner 以非 root 运行，构建用户无权修改发行版基础文件。WSL2 与 Windows 共享内核，这一残余风险在安全文档中披露。
+- 工作区位于发行版内 ext4；源项目以只读方式经 `wsl.exe` stdio 单向传入，补丁、日志和截图以 tar 流回传。
+- 依赖获取采用严格两阶段：第一阶段经白名单代理访问 Maven Central、PyPI、npm 和用户配置的私有仓库，尽量不执行项目脚本；第二阶段断网构建与测试。离线装不上的依赖进入报告，需要联网的步骤逐项人工批准。
+- 已批准的例外：Gradle 源项目在联网阶段允许执行项目自身的构建脚本，限制为白名单网络、仅下载请求、每项目独立缓存，并在报告中披露。
+- 不挂载宿主机敏感目录和 Docker socket。只有沙箱内产生的构建和测试结果可以标记为自动验证证据。
 
 ### 10.4 供应链与许可证
 
@@ -438,8 +476,9 @@ flowchart TD
 ### 12.3 工程实践
 
 - 使用版本控制和短分支/小补丁，所有变更经过代码评审。
-- CI 覆盖 Rust、Java、Python、TypeScript 的单元和契约测试。
-- Linux 与 Windows/WSL2 运行安装和沙箱集成测试。
+- 仓库级自动化先行：PR 规范检查、安全基线、协作模板、文档链接检查；各组件的 CI 随该组件第一个 PR 加入。
+- CI 覆盖 Rust、Java、Python、TypeScript 的单元和契约测试，按执行环境拆开：Windows runner 测 Core、Worker 与界面；Ubuntu runner 测 runner、环境包、沙箱与断网行为。
+- 完整的 Windows + WSL2 手工联调在 X.Y.0 的 PR 合并前执行，结果写入该 PR；触及 runner 或桥接的 patch 同样处理。
 - 每次模型、提示词或映射变更运行分层基准：快速符合性、金样、外部保留集。
 - 安全测试覆盖恶意构建脚本、路径穿越、密钥泄露、网络 egress 和资源耗尽。
 - 发布包含支持矩阵、已知限制、SBOM、模型注册表和可复现测试命令。
@@ -451,9 +490,9 @@ flowchart TD
 - 两套参考栈及明确特性矩阵。
 - Java↔Python 双向，前端和后端分层迁移。
 - 整项目扫描、依赖闭包和约 5 万行/批次。
-- Rust Core + Java/Python Worker + React/TS Web + CLI。
+- Rust Core + Tauri 桌面壳 + React/TS 前端 + Java/Python Worker + WSL2 runner + CLI。
 - 本地项目授权、默认云端可插拔模型、最小上传。
-- 容器沙箱、构建/测试/差分/API/E2E/视觉/性能验证。
+- WSL2 隔离沙箱、构建/测试/差分/API/E2E/视觉/性能验证。
 - 人工架构优化和外部契约批准。
 - 单用户、“迁移完成/行为已验证”分级。
 - 金样全部通过和至少 8 个外部项目试点。
@@ -461,6 +500,7 @@ flowchart TD
 ### 13.2 V2：扩大矩阵、规模质量与验证深化
 
 - 增加更多 Java/Python Web 框架、前端栈和构建工具的受支持组合。
+- 补齐 Java 8/11 与 Spring Boot 2 的迁移支持，并评估 Linux 桌面版。
 - 扩展依赖和标准库映射，持续提升 Python→Java 类型恢复。
 - 加强特征测试、差分测试、未验证语义检测和自动修复质量。
 - 支持更大批次、更复杂模块和更好的增量迁移性能。
@@ -501,6 +541,23 @@ flowchart TD
 2. 金样项目、外部保留项目和 8 个试点项目的选择规则。
 3. IR/Worker 协议 schema、trace ID 和错误分类。
 4. 模型基准、快照、提示词、调用预算和主备选择。
-5. 沙箱镜像、浏览器字体和零像素测试环境。
+5. 环境包版本、浏览器字体和零像素测试环境。
 6. 首版依赖映射格式、许可证策略和审计字段。
 7. 首个垂直切片完成后的安装包、缓存、模型和工作区实际大小复测。
+
+## 附录 A 已废止结论
+
+本附录保留被后续决策推翻的条款，便于追溯旧会话与旧评审意见。除单独注明者外，废止生效日为 2026-11-17。
+
+| 原条款 | 原结论 | 废止原因 | 现行替代 |
+| --- | --- | --- | --- |
+| §5.1、§6、§9.1、§10.3 | 沙箱为 Docker/Podman 固定镜像，用户自备容器运行时 | 交付形态改为 Windows 安装包 + WSL2，用户无需安装 Docker | §5.1“WSL2 沙箱”、§10.3 |
+| §5.1、§6、§10.1 | Rust Core 提供 Axum 本地 API，并作为对外契约 | 界面走 Tauri IPC，CLI 直接链接 Core 库，本地 API 已无使用方 | §3.5 契约面三项、§10.1 |
+| §6 Web 行 | “V1 桌面壳”列为不采用方案 | 安装包成为必做项，Tauri 复用系统 WebView2 | §6“桌面壳”行 |
+| §9.2 | 正式支持 Linux 与 Windows 11 + WSL2 | V1 只发布 Windows 11 x64；CI 无 Linux 发布目标 | §9.2 |
+| §9.1 | 交付 Docker Compose 编排与沙箱镜像定义 | 同上 | §9.1 交付物 1–3 |
+| §5.1（早期方案） | Worker 运行在容器内 | Worker 在 Windows 本机运行更简单，且不需要容器权限 | §5.2 |
+| 发布渠道 | GitHub Releases + GHCR | 不再产出容器镜像 | docs/design/delivery.md |
+| §10.1 | Web 绑定 `127.0.0.1` 并使用随机会话令牌 | 程序不监听任何端口 | §10.1 |
+| §9.3 | 基础运行与沙箱镜像 3–8 GB | 改为环境包几百 MB + 工具链按需下载 | §9.3 |
+| §12.3 | Linux 与 Windows/WSL2 均运行安装与沙箱集成测试 | GitHub 托管 Windows runner 不支持 WSL2，改为拆分执行 | docs/process/ci.md |
