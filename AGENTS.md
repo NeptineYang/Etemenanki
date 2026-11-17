@@ -4,8 +4,9 @@
 
 - 本项目是本地优先、可验证、人机协同的 Java↔Python 代码迁移工作台，不是代码片段翻译器，也不承诺任意项目一键等价迁移。
 - 产品范围、架构和验收以 [DESIGN.md](DESIGN.md) 为准；[RESEARCH.md](RESEARCH.md) 提供调研依据，不替代已确认的设计。改动前先阅读相关章节。
-- 平台主栈：Rust Core（Tokio、Axum、Clap、Serde、SQLite）、Java 17 Worker（JavaParser / Symbol Solver，Spoon 按需）、Python 3.12 Worker（LibCST、ast、pytest）、React + TypeScript + Vite 工作台。
-- 构建与依赖工具为 Cargo、Maven、uv、npm/pnpm；Gradle 等实验组合不得自行提升为保证范围。实际目录、版本和执行命令以仓库构建清单为准，不宣称未实现的能力。
+- 平台主栈：Rust Core（Tokio、Clap、Serde、SQLite）、Tauri 2 桌面壳（系统 WebView2）、React + TypeScript + Vite 工作台（pnpm）、Java 17 Worker（JavaParser / Symbol Solver，Spoon 按需，随包 jlink 精简 JRE）、Python 3.12 Worker（LibCST、ast、pytest，随包 embeddable Python）、WSL2 内的 Rust runner（bubblewrap + cgroup v2）。V1 只发布 Windows 11 x64，不要求 Docker/Podman，不提供本地 HTTP API，程序不监听任何端口。
+- 构建与依赖工具为 Cargo、Maven、uv、pnpm；沙箱环境是基于 Debian 13 slim 的 `.wsl` 环境包。Gradle 等实验组合不得自行提升为保证范围。实际目录、版本和执行命令以仓库构建清单为准，不宣称未实现的能力。
+- 仓库布局：`crates/`（Core）、`apps/desktop/`（Tauri 壳）、`web/`（前端）、`workers/{java,python}/`、`runner/`（WSL 内 runner）、`packaging/wsl/`（环境包定义）、`schemas/`、`mappings/`、`tests/golden/`、`docs/`、`journal/`。
 - Spring Boot↔FastAPI/Django、React↔Reflex、Thymeleaf↔Django Templates 是受支持的迁移参考栈，不是平台自身的实现栈；支持范围见 DESIGN.md §3.3。
 
 ## 2. AI 执行边界
@@ -32,8 +33,9 @@
 - 确定性解析、符号分析、依赖闭包和规则转换不交给模型替代；Rust Core 不重复实现 Java 类型求解或 Python CST。Worker 协议和迁移 IR 保持版本化边界。
 - 未知语义、跳过文件、低置信度结果和验证缺口必须显式报告；不丢失语言专属信息，不伪造成功状态。
 - 默认保持 API、数据库 schema、消息协议、文件格式和 CLI 契约；架构变化、契约变化及安全策略放宽必须经人工批准。
-- 导入项目与模型输出均视为不可信输入。源项目默认只读，修改以受控补丁应用到独立工作区；模型不得直接写入宿主机或访问未授权路径、凭据和 Docker socket。
-- 导入项目及生成项目的构建、测试必须在 Docker/Podman 沙箱内执行：默认断网、无特权、资源受限。只有沙箱结果可作为自动验证证据。
+- 导入项目与模型输出均视为不可信输入。源项目默认只读，修改以受控补丁应用到独立工作区；模型不得直接写入宿主机，不得访问未授权路径、凭据，或任何容器与 WSL 控制接口。
+- 导入项目及生成项目的构建、测试必须在 WSL2 发行版内的 bubblewrap 沙箱执行：默认断网、无特权、cgroup v2 限制资源。只有沙箱结果可作为自动验证证据；Windows 侧只允许下载与读取依赖，不执行项目脚本与构建。
+- Gradle 源项目在联网阶段允许执行项目自身的构建脚本，这是已批准的例外，限制条件见 [docs/design/security.md](docs/design/security.md)；不得把该例外扩展到其他生态。
 - 云端模型按项目授权，仅上传必要上下文并先扫描敏感内容；未经授权只使用本地模型或确定性能力。
 - 自动修复受时间、轮数、token 和成本预算约束；预算耗尽输出失败证据与人工任务，不无限重试。
 - “迁移完成”与“行为已验证”不得混用；后者必须满足约定自动测试、人工审核和缺口披露，标准见 DESIGN.md §8。
@@ -45,12 +47,13 @@
 - 分支格式为 `类型/简短描述`，使用小写英文和连字符，如 `feat/project-scan`、`fix/worker-timeout`；类型采用 `feat`、`fix`、`refactor`、`docs`、`chore`、`test` 等。
 - Commit 格式为 `类型: 简短描述`，英文冒号后一个空格，动宾短语，结尾不加句号。类型采用 `feat`、`fix`、`refactor`、`chore`、`test`、`docs`、`build`、`data`。
 - 一个 commit 只做一件事；功能、格式调整和无关改动分开提交，只暂存本次任务的明确文件，不使用 `git add .`。
+- 版本号由 CI 在 PR 合并后打标签产生，规则见 [docs/process/versioning.md](docs/process/versioning.md)。AI 不修改构建清单中的版本号，不自行打标签、不发布 Release、不移动或删除已有标签。
 
 ## 6. 验证与 Pull Request
 
 - 提交前检查相关组件的格式、lint、类型、构建和测试；修复缺陷补充回归测试，新增语言特性、框架映射或协议变化同步增加符合性或契约测试。
 - 迁移链路先复现源项目基线，再执行目标构建、单元/集成、API/差分验证；涉及 UI 时执行关键交互和受控环境视觉测试，不以编译成功代替行为验证。
-- 工作台界面改动须启动开发服务并在浏览器验证主流程和边界场景；未能验证时明确说明，不宣称通过。
+- 工作台界面改动须在 `pnpm tauri dev` 的桌面窗口中验证主流程与边界场景；涉及 WSL2 桥接的改动按 [docs/process/ci.md](docs/process/ci.md) 的手工联调清单执行。未能验证时明确说明，不宣称通过。
 - 模型、提示词或映射变更执行相应分层基准，保留失败结果与未参与调优的保留集，不混用指标。
 - PR 的 base 为 `main`，compare 为任务分支；标题格式同 commit，正文包含改动内容、改动原因、验证方式和备注，界面或输出变化附截图或日志。
 - 验证方式记录实际命令、预期与实际结果、未执行项及原因；依赖清单同步且无调试或敏感内容残留后再发起评审。
@@ -66,3 +69,5 @@
 - 任务先认领再动手，修改公共模块、协议或目录约定前先沟通，避免重复修改同一文件。
 - 需求、接口、字段、支持矩阵或目录约定变化时同步更新相关设计、测试与协作规则；不要引用其他项目不存在的文件。
 - 卡住超过 30 分钟就求助，说明完整报错、影响和已尝试的方法；评审无人响应时主动联系评审人。
+- 会话开始先读 `journal/` 中当前任务分支的日志，结束前追加一条记录：日期、工具/模型、做了什么、验证结果、未完成项、下一步。`JOURNAL.md` 只保留格式与索引，实际记录按分支写在 `journal/<branch>.md`。
+- 日志仓库公开，不得写入密钥、敏感源码、用户项目内容或个人信息。
