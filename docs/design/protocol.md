@@ -1,8 +1,8 @@
 # Worker 与 runner 协议
 
 - 状态：V1 设计基线
-- 日期：2026-11-17
-- 依据：DESIGN.md §5.1、§5.2、§11，Q21、Q32、Q33、Q39、Q41、Q56
+- 日期：2026-11-18
+- 依据：DESIGN.md §5.1、§5.2、§5.5、§11，Q21、Q32、Q33、Q39、Q41、Q56、Q97
 - 上位文档：[DESIGN.md](../../DESIGN.md)
 
 ## 1. 角色与链路
@@ -18,7 +18,7 @@
 ## 2. 分帧
 
 - 连接是单工 stdin/stdout 对：Core 写子进程 stdin，读子进程 stdout。
-- 帧格式为 `1 字节类型 + 4 字节大端长度 + 载荷`。类型 `0x01` 为 JSON 消息，类型 `0x02` 为二进制载荷（tar 流、补丁包、截图）。
+- 帧格式为 `1 字节类型 + 4 字节大端长度 + 载荷`。类型 `0x01` 为 JSON 消息，类型 `0x02` 为二进制载荷（tar 流、产物包、截图）。
 - JSON 消息是单行 UTF-8 编码的 JSON-RPC 2.0 对象；纯 JSON 场景下等价于 NDJSON。
 - 单帧上限默认 8 MiB，超过时改用二进制帧分块传输，块大小 4 MiB；上限可在 `initialize` 中协商。接收方必须流式处理二进制帧，不得整块读入内存后再落盘。
 - stdout 只承载协议帧。日志、进度提示、第三方工具的原始输出一律写 stderr，并带 trace ID 前缀，防止污染协议。
@@ -31,15 +31,23 @@
 | 方法 | 方向 | 说明 |
 | --- | --- | --- |
 | `initialize` | Core → Worker | 交换协议版本、能力位、工具链清单、并发上限 |
-| `workspace.import` / `workspace.export` | 双向 | 以二进制帧传输 tar 流，导入源项目快照或导出补丁与产物 |
+| `workspace.import` / `workspace.export` | 双向 | 以二进制帧传输 tar 流，导入源项目快照或导出阶段差异与产物 |
 | `project.scan` | Core → Worker | 建立文件清单、构建系统识别、配置与资源清点 |
 | `parse.file` / `parse.project` | Core → Worker | 返回 AST 摘要与源位置，不返回内部节点句柄 |
 | `symbol.resolve` | Core → Worker | 类型、签名、继承与实现关系 |
 | `types.infer` | Core → Worker | 类型证据与置信度，供迁移 IR 使用 |
+| `graph.query` | Core → runner | 查询节点邻域、调用方/被调方、类型证据与受影响测试；只读，返回结构化摘要 |
+| `skill.read` | Core → Worker | 按栈与关键词读取知识条目；只读，返回条目 id、版本与正文 |
+| `fs.list` / `fs.read` / `fs.stat` | Core → 任一方 | 只读，路径经规范化校验，限工作区根内 |
+| `fs.write` | Core → runner | 写入或覆盖目标工作区文件；源项目路径一律拒绝；产生 `file.changed` 事件 |
+| `fs.delete` | Core → runner | 删除目标工作区文件；记入删除清单，源项目路径一律拒绝 |
+| `shell.exec` | Core → runner | 执行单条命令，受 DESIGN §5.5.5 的命令约束；返回退出码、stdout/stderr 尾部与耗时 |
 | `deps.resolve` | Core → runner | 两阶段依赖解析与下载，返回坐标、哈希与缺口 |
-| `build.run` / `test.run` | Core → runner | 返回结构化结果、原始日志引用与产物路径 |
+| `build.run` / `test.run` / `lint.run` | Core → runner | 返回结构化结果、原始日志引用与产物路径 |
 | `screenshot.capture` | Core → runner | 受控环境截图，写入工作区 |
-| `fs.read` / `fs.write` / `fs.list` | Core → 任一方 | 仅限工作区根目录内，路径经规范化校验 |
+| `stage.report` | Core → 审计 | 落盘阶段报告并触发判据校验；每阶段恰一次 |
+| `budget.status` | Core → 内部 | 返回阶段与项目剩余 token、工具轮数 |
+| `decision.request` | Core → 界面 | 发起中断请求，返回 `pending` 或人工决定 |
 | `cancel` | Core → 任一方 | 通知，按 `request id` 取消未完成调用 |
 | `progress` / `log` | 任一方 → Core | 通知，携带 trace ID 与阶段 |
 | `shutdown` | Core → 任一方 | 优雅退出；超时后强制结束进程 |
@@ -72,20 +80,43 @@
 
 ## 7. 任务状态机
 
-```
-queued → preparing → baseline → analyzing → planning
-       → generating → verifying → awaiting_review → completed
-                                             ↘ failed / cancelled
+转写按阶段推进，状态机因此是循环而非单遍：
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> preparing
+    preparing --> baseline
+    baseline --> analyzing
+    analyzing --> planning
+    planning --> awaiting_plan_approval
+    awaiting_plan_approval --> planning: 驳回或要求修订
+    awaiting_plan_approval --> executing: 批准计划
+    executing --> awaiting_gate: 判据达成并提交阶段报告
+    executing --> executing: 预算未耗尽且判据未达成
+    executing --> failed: 预算耗尽或保险丝触发
+    awaiting_gate --> executing: 放行且有后续阶段 / 提出意见需修复
+    awaiting_gate --> executing: 回滚重跑
+    awaiting_gate --> verifying: 放行且无后续阶段
+    verifying --> awaiting_review
+    awaiting_review --> completed: 审核通过
+    awaiting_review --> planning: 审核不通过，追加修复阶段
+    awaiting_plan_approval --> cancelled
+    executing --> cancelled
+    failed --> [*]
+    completed --> [*]
+    cancelled --> [*]
 ```
 
-- 状态持久化在 SQLite，每个批次有幂等 ID 与检查点。
-- 崩溃后从最近检查点恢复，不重复覆盖已审核结果。
-- `awaiting_review` 是人工闸门，不是自动完成状态。
-- 并发上限默认值为：解析 `min(4, CPU 物理核数 / 2)`，构建与测试 1，截图 1；构建串行是为了避免缓存与端口争用。上限可在设置中下调，不允许超过默认值的两倍。
+- 状态持久化在 SQLite，每个阶段有幂等 ID 与检查点；`awaiting_plan_approval`、`awaiting_gate`、`awaiting_review` 三个人工闸门都不是自动完成状态。
+- “部分完成”是报告口径里的结果状态（见 [metrics.md](metrics.md) §1），不是运行时状态；运行停在闸门时状态仍是 `awaiting_gate`。
+- 崩溃后从最近检查点恢复：阶段内恢复到该阶段开始快照，已通过并放行的阶段不重跑，避免覆盖人工已批准的结果。
+- 计算型并发上限默认值为：解析 `min(4, CPU 物理核数 / 2)`，构建、测试与 lint 合计 1，截图 1。构建串行是为了避免缓存与端口争用；模型侧的模块级并行由 Core 按并发上限调度，与构建串行互不冲突（排队而非并发）。
+- 上限可在设置中下调，不允许超过默认值的两倍。
 
 ## 8. 类型定义
 
-- Worker 协议、迁移 IR、报告结构以 JSON Schema 为唯一来源，存放于 `schemas/`。
+- Worker 协议、迁移 IR、阶段计划、阶段报告与报告结构以 JSON Schema 为唯一来源，存放于 `schemas/`。
 - Rust、TypeScript、Java、Python 的类型由 schema 生成，不手写重复定义。
 - schema 变更必须同步契约测试；破坏性变更按中间位版本处理。
 
@@ -93,7 +124,7 @@ queued → preparing → baseline → analyzing → planning
 
 ### 9.1 模型回放缓存
 
-- 键为 `SHA256(provider + model_snapshot + prompt_version + messages + tool_schema)`，值为原始响应与结构化结果，存 SQLite。
+- 键为 `SHA256(provider + model_snapshot + prompt_version + stage_id + context_hash + messages + tool_schema)`，值为原始响应与结构化结果，存 SQLite。`context_hash` 覆盖本次装配注入的全部内容，含 skill 版本与预取文档快照哈希。
 - 默认关闭；基准测试、回归与问题复现时开启。命中缓存必须在审计中记录，不得伪装成新的模型调用。
 - 容量上限 2 GiB，按最近最少使用淘汰；缓存不跨项目共享，删除项目时一并清除。
 
@@ -107,3 +138,5 @@ queued → preparing → baseline → analyzing → planning
 
 - 方法名与字段的最终命名（当前为初版，允许在 V1-A 调整一次）。
 - `initialize` 能力位的完整清单。
+- `shell.exec` 的白名单内容与命令拒绝规则的具体实现。
+- `stage.report` 与 `decision.request` 的载荷 schema。
