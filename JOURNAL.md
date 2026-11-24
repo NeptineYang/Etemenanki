@@ -19,3 +19,4 @@
 | --- | --- |
 | [journal/main.md](journal/main.md) | 2026-11-16 设计拷问 Q1–Q49；2026-11-17 文档落地 Q50–Q65 |
 | [journal/docs/transcription-agent.md](journal/docs/transcription-agent.md) | 2026-11-18 转写 agent 架构定稿 Q70–Q101 |
+| [journal/chore/ui-map-assets.md](journal/chore/ui-map-assets.md) | 2026-11-24 UI 地图参考图入库 |
